@@ -13,30 +13,40 @@ The workflow covers:
 
 ## Project Structure
 ```
-├── DockerFile           # for Dockerization
-├── Secom_Notebook.ipynb       # Notebook file 
-├── config.json          # saved features, threshold
-├── exported_model.zip   # saved model for predictions
-├── main.py              # fastapi backend
-├── sample_test.py       # sample testcases 
-├── requirements.txt     # requirements for application
-└── README.md
+├── app/     
+│   ├── main.py                # FastAPI Application
+│   ├── config.json            # contains selected features and threshold
+│
+├── model/                     # Saved Model
+│   └── exported_model/
+├── Secom_Notebook.ipynb       # Notebook file
+├── Dockerfile                 # File for Dockerization
+├── requirements.txt           # requirements for application
+├── .dockerignore
+├── .gitignore
+└── .github/
+    └── workflows/
+        └── ci.yml
 ```
 ## Results
 **Top K- experimentation aganist PR-AUC Scores**
 
-![K-values](k_values.png)
+![K-values](feature_performance.png)
 
-*K=150 has the highest PR-AUC score of 0.27*
+*K=100 has the highest PR-AUC score of 0.23*
 
-**Hyperparameter Tuning of the best model (RandomForest) with selected Top-150 features**
+**Different Model Performances against PR-AUC Scores on selected top-100 features**
+![Model-selection](model_selection.png)
 
-![pr_values](pr_values.png)
+*Selected **Random Forest** as best performing model with PR-AUC of 0.26*
 
-Best Parameters found: {n_estimators: 200, max_depth: 10, min_split: 2, min_leaf: 1} *resulted in pr_auc score: 0.297 and roc-auc score: 0.797*
+**Hyperparameter Tuning of the best model (RandomForest) with selected Top-100 features**
 
-**7.5% improvement from baseline in pr_auc acheieved by hyperparamter tuning**
+![parameter_tuning](parameter_tuning.png)
 
+Best Parameters found: {n_estimators: 100, max_depth: 10, min_split: 5, min_leaf: 1} *resulted in pr_auc score: 0.331 and roc-auc score: 0.782*
+
+**26.92% improvement from baseline in pr_auc acheieved by hyperparamter tuning**
 
 
 Predicted Probabilities on test data and evaluated **Precision**, **Recall**, **F1-Score** at multiple thresholds and optimal threshold is selected based on max **F1-Score** for balanced performance.
@@ -45,19 +55,21 @@ Predicted Probabilities on test data and evaluated **Precision**, **Recall**, **
 
 | Class | Precision | Recall | F1-Score | Support |
 | :--- | :--- | :--- | :--- | :--- |
-| **0 (Pass)** | 0.93 | 1.00 | 0.97 | 440 |
-| **1 (Fail)** | 0.00 | 0.00 | 0.00 | 31 |
-| **Accuracy** | | | **0.93** | 471 |
+| **0 (Fail)** | 0.93 | 1.00 | 0.97 | 293 |
+| **1 (Pass)** | 0.00 | 0.00 | 0.00 | 21 |
+| **Accuracy** | | | **0.93** | 314 |
 
-**Tuned Performance** *@0.189*
+![threshold_tuning](threshold_tuning.png)
+
+**Tuned Performance** *@0.217*
 
 | Class | Precision | Recall | F1-Score | Support |
 | :--- | :--- | :--- | :--- | :--- |
-| **0 (Pass)** | 0.96 | 0.97 | 0.96 | 440 |
-| **1 (Fail)** | 0.46 | 0.42 | 0.44 | 31 |
-| **Accuracy** | | | **0.93** | 471 |
+| **0 (Pass)** | 0.96 | 0.97 | 0.97 | 293 |
+| **1 (Fail)** | 0.56 | 0.48 | 0.51 | 21 |
+| **Accuracy** | | | **0.94** | 314 |
 
-**Improved Minority Class F1 from 0 → 0.44**\
+**Improved Minority Class F1 from 0 → 0.51**\
 This model is saved in local directory using `mlflow.sklearn.save_model(model,"exported_model")`
 
 ## Dataset Details
@@ -75,22 +87,22 @@ This model is saved in local directory using `mlflow.sklearn.save_model(model,"e
 * Used **SelectKBest(f_classif)**
 * Evaluated multiple *k* values: [50,75,100,125,150,175,200]
 * Tracked experiments using **MLFlow**
-* Metric used: **PR-AUC** for comparision across k values with RandomForest Classifier
-**Selected Top 150** features based on the best **PR-AUC**
+* Metric used: **PR-AUC** for comparision across k values on different folds (n_splits=5) aggregated PR-AUC across folds for different k values on **validation data** subsetted from training data with preserved class balance.
+**Selected Top k(100)** features based on the best aggregated **PR-AUC** across splits for stability.
 
 ## Model Training & Comparision
-Trained multiple models with selected top 150 features evaluated using PR-AUC
+Trained multiple models with selected top 100 features evaluated using PR-AUC
 * RandomForest
 * XGBoost
 * LightGBM
-* Logistic Regression
+* Logistic Regression (with scaled data)
 
 Handling Imbalance
 * `class_weight="balanced"` (where applicable)
 * LightGBM → `scale_pos_weight`\
-**Best Model: RandomForest, PR-AUC: 0.2718** (outperformed all other models)
+**Best Model: RandomForest, PR-AUC: 0.26** (outperformed all other models)
 
-## Hyperparameter Tuning
+## Hyperparameter Tuning on test data
 * Tuned:
   * `n_estimators`
   * `max_depth`
@@ -101,7 +113,7 @@ Handling Imbalance
 
 ## Configuration Management 
 Saved in (config.json):
-* Selected features (Top 150)
+* Selected features (Top 100)
 * Optimal threshold
 
 ## API Deployment
@@ -109,27 +121,29 @@ Built inference API using **FastAPI**
 Features:
 * Loads trained model
 * Arranges features in the training order of the model using `config.json`
+* Raises error on missing features
 * Used Tuned threshold
-* Returns classification output and probability
+* Returns classification output and probability of pass or fail
 
-## Dockerization
-* Entire project containerized using **Docker**
-* Pushed image to [Docker Repository](https://hub.docker.com/repository/docker/abhinay1289/secom_api) for reproducible environment
+## Dockerization through GitHub Actions (CI/CD)
+* Created workflow to auto build docker image of the entire repository
+* Pushed image to [Docker Repository](https://hub.docker.com/repository/docker/abhinay1289/secom-app) for serving the model
 
 ## Cloud Deployment
 * Deployed on **AWS(Amazon Web Services) EC2** (Ubuntu instance)
 * Pulled Docker image in the instance and served API on cloud
 
 ## Try it out
-run `docker pull abhinay1289/secom_api:latest`\
-run `docker run -p 8000:8000 abhinay1289/secom_api:latest`\
+run `docker pull abhinay1289/secom-app:latest`\
+run `docker run -p 8000:8000 abhinay1289/secom-app:latest`\
 
 access API on `http://localhost:8000` and interactive docs on `http://localhost:8000/docs`\
 
 *Example response*
 ```
 {
-  "prediction": pass,
-  "probability": 0.63
-}
+    "prediction": prediction,
+    "prob_pass": float(pass_prob),
+    "prob_fail": float(fail_prob),
+    "threshold":threshold}  # returing threshold for debugging purposes
 ```
